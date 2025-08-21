@@ -52,7 +52,8 @@ class TopDeskClient:
     def get_transaction_assets(
         self,
         template_id: str,
-        fields: Optional[List[str]] = None
+        fields: Optional[List[str]] = None,
+        filter: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
         Obter dados transacionais (por TemplateID).
@@ -64,6 +65,8 @@ class TopDeskClient:
         params = {}
         if fields:
             params["field"] = fields
+        if filter:
+            params["$filter"] = filter
         resp = self.session.get(url, params=params)
         resp.raise_for_status()
         return resp.json().get('results', [])
@@ -198,7 +201,7 @@ def get_incident(incident_id: str, user: str = Depends(verify_basic_auth)) -> Di
     summary="Retorna ativos do TopDesk",
     description="Lista todos os ativos transacionais por Template ID."
 )
-def list_assets(template_id: str, fields: Optional[str] = None, user: str = Depends(verify_basic_auth)) -> List[Dict[str, Any]]:
+def list_assets(template_id: str, fields: Optional[str] = None, filter: Optional[str] = None, user: str = Depends(verify_basic_auth)) -> List[Dict[str, Any]]:
     logging.info('GET /v1/assets')
     client = get_topdesk_client()    
     fields_lst = None
@@ -207,7 +210,7 @@ def list_assets(template_id: str, fields: Optional[str] = None, user: str = Depe
         if fields:
             fields_lst = fields.split(',')
     try:
-        return client.get_transaction_assets(template_id=template_id, fields=fields_lst)
+        return client.get_transaction_assets(template_id=template_id, fields=fields_lst, filter=filter)
     except Exception as e:
         logging.error(str(e))
         return [] # fixme: fastapi must return server side error with error message
