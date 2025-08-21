@@ -1,6 +1,5 @@
 import azure.functions as func
 import fastapi
-import logging
 import requests
 from typing import List, Optional, Dict, Any
 from dotenv import load_dotenv
@@ -8,6 +7,8 @@ import os
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 import secrets
+from loguru import logger 
+
 load_dotenv()
 
 class TopDeskClient:
@@ -31,29 +32,39 @@ class TopDeskClient:
     # ------------------------------
     # Incident Endpoints
     # ------------------------------
-    def list_incidents(self) -> List[Dict[str, Any]]:
+    def list_incidents(self, pageStart: Optional[int] = None,
+                             pageSize: Optional[int] = None) -> List[Dict[str, Any]]:
         """
         Listar chamados (incidentes).
         """
+        logger.info(f"Fetching incidents with pageStart: {pageStart}, pageSize: {pageSize}")
         url = f"{self.base_url}/incidents"
-        resp = self.session.get(url)
+        params = {}
+        if pageStart is not None or pageSize is not None:
+            if pageStart is not None:
+                params["pageStart"] = pageStart
+            if pageSize is not None:
+                params["pageSize"] = pageSize
+        resp = self.session.get(url, params=params)
         resp.raise_for_status()
         return resp.json()
     
     def get_incident_by_id(self, incident_id: str) -> Dict[str, Any]:
-            url = f"{self.base_url}/incidents/id/{incident_id}"
-            resp = self.session.get(url)
-            resp.raise_for_status()
-            return resp.json()
+        url = f"{self.base_url}/incidents/id/{incident_id}"
+        resp = self.session.get(url)
+        resp.raise_for_status()
+        return resp.json()
     
     # ------------------------------
     # Transaction Assets
     # ------------------------------
     def get_transaction_assets(
         self,
-        template_id: str,
+        template_id: Optional[str] = None,
         fields: Optional[List[str]] = None,
-        filter: Optional[str] = None
+        filter: Optional[str] = None,
+        pageStart: Optional[int] = None,
+        pageSize: Optional[int] = None
     ) -> List[Dict[str, Any]]:
         """
         Obter dados transacionais (por TemplateID).
@@ -61,15 +72,23 @@ class TopDeskClient:
         :param template_id: Template ID (string)
         :param fields: Optional list of fields to include
         """
-        url = f"{self.base_url}/assetmgmt/assets/templateId/{template_id}"
+        logger.info(f"Fetching assets for template_id: {template_id}, fields: {fields}, filter: {filter}, pageStart: {pageStart}, pageSize: {pageSize}")
+        url = f"{self.base_url}/assetmgmt/assets"
         params = {}
+        if template_id:
+            params["templateId"] = template_id
         if fields:
             params["field"] = fields
         if filter:
             params["$filter"] = filter
+        if pageStart is not None or pageSize is not None:
+            if pageStart is not None:
+                params["pageStart"] = pageStart
+            if pageSize is not None:
+                params["pageSize"] = pageSize
         resp = self.session.get(url, params=params)
         resp.raise_for_status()
-        return resp.json().get('results', [])
+        return resp.json().get('dataSet', [])
     
     def get_asset_by_id(self, asset_id: str) -> Dict[str, Any]:
         url = f"{self.base_url}/assetmgmt/assets/id/{asset_id}"
@@ -167,13 +186,16 @@ def verify_basic_auth(credentials: HTTPBasicCredentials = Depends(security)):
     summary="Retorna incidentes do TopDesk",
     description="Lista todos os incidentes."
 )
-def list_incidents(user: str = Depends(verify_basic_auth)) -> List[Dict[str, Any]]:
-    logging.info('GET /v1/incidents')
+def list_incidents(
+    pageStart: Optional[int] = None, pageSize: Optional[int] = None, _: str = Depends(verify_basic_auth)
+) -> List[Dict[str, Any]]:
+    logger.info('GET /v1/incidents')
     client = get_topdesk_client()
     try:
-        return client.list_incidents()
+        # Pass pagination params to TopDeskClient when implemented
+        return client.list_incidents(pageStart, pageSize)  # TODO: add pagination support in client
     except Exception as e:
-        logging.error(str(e))
+        logger.error(str(e))
         return []
 
 @fapi_app.get(
@@ -184,13 +206,13 @@ def list_incidents(user: str = Depends(verify_basic_auth)) -> List[Dict[str, Any
     summary="Retorna incidente específico do TopDesk dado seu identificador.",
     description="Obtém um incidente específico pelo ID."
 )
-def get_incident(incident_id: str, user: str = Depends(verify_basic_auth)) -> Dict[str, Any]:
-    logging.info('GET /v1/incidents')
+def get_incident(incident_id: str, _: str = Depends(verify_basic_auth)) -> Dict[str, Any]:
+    logger.info('GET /v1/incidents')
     client = get_topdesk_client()
     try:
         return client.get_incident_by_id(incident_id)
     except Exception as e:
-        logging.error(str(e))
+        logger.error(str(e))
         return {}
 
 @fapi_app.get(
@@ -201,8 +223,15 @@ def get_incident(incident_id: str, user: str = Depends(verify_basic_auth)) -> Di
     summary="Retorna ativos do TopDesk",
     description="Lista todos os ativos transacionais por Template ID."
 )
-def list_assets(template_id: str, fields: Optional[str] = None, filter: Optional[str] = None, user: str = Depends(verify_basic_auth)) -> List[Dict[str, Any]]:
-    logging.info('GET /v1/assets')
+def list_assets(
+    template_id: Optional[str] = None,
+    fields: Optional[str] = None,
+    filter: Optional[str] = None,
+    pageStart: Optional[int] = None,
+    pageSize: Optional[int] = None,
+    _: str = Depends(verify_basic_auth)
+) -> List[Dict[str, Any]]:
+    logger.info('GET /v1/assets')
     client = get_topdesk_client()    
     fields_lst = None
     if fields:
@@ -210,9 +239,11 @@ def list_assets(template_id: str, fields: Optional[str] = None, filter: Optional
         if fields:
             fields_lst = fields.split(',')
     try:
-        return client.get_transaction_assets(template_id=template_id, fields=fields_lst, filter=filter)
+        return client.get_transaction_assets(template_id=template_id,
+                                             fields=fields_lst, filter=filter,
+                                             pageStart=pageStart, pageSize=pageSize)
     except Exception as e:
-        logging.error(str(e))
+        logger.error(str(e))
         return [] # fixme: fastapi must return server side error with error message
 
 @fapi_app.get(
@@ -224,12 +255,12 @@ def list_assets(template_id: str, fields: Optional[str] = None, filter: Optional
     description="Obtém um ativo específico pelo ID."
 )
 def get_asset(asset_id: str, user: str = Depends(verify_basic_auth)) -> Dict[str, Any]:
-    logging.info('GET /assets')
+    logger.info('GET /assets')
     client = get_topdesk_client()
     try:
         return client.get_asset_by_id(asset_id)
     except Exception as e:
-        logging.error(str(e))
+        logger.error(str(e))
         return {} # fixme: fastapi must return server side error with error message
     
 
@@ -242,12 +273,12 @@ def get_asset(asset_id: str, user: str = Depends(verify_basic_auth)) -> Dict[str
     description="Lista todas as mudanças."
 )
 def list_changes(fields: Optional[str], user: str = Depends(verify_basic_auth)) -> List[Dict[str, Any]]:
-    logging.info('GET /changes')
+    logger.info('GET /changes')
     client = get_topdesk_client()
     try:
         return client.list_changes(fields=fields)
     except Exception as e:
-        logging.error(str(e))
+        logger.error(str(e))
         return [] # fix me: fastapi must return server side error with error message
     
 @fapi_app.get(
@@ -259,12 +290,12 @@ def list_changes(fields: Optional[str], user: str = Depends(verify_basic_auth)) 
     description="Obtém uma mudança específica pelo ID."
 )
 def get_change(change_id: str, fields: Optional[str], user: str = Depends(verify_basic_auth)) -> Dict[str, Any]:
-    logging.info('GET /changes/{change_id}')
+    logger.info('GET /changes/{change_id}')
     client = get_topdesk_client()
     try:
         return client.get_change_by_id(change_id, fields)
     except Exception as e:
-        logging.error(str(e))
+        logger.error(str(e))
         return {} # fix me: fastapi must return server side error with error message
     
 
