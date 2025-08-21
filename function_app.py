@@ -66,7 +66,7 @@ class TopDeskClient:
             params["field"] = fields
         resp = self.session.get(url, params=params)
         resp.raise_for_status()
-        return resp.json()
+        return resp.json().get('results', [])
     
     def get_asset_by_id(self, asset_id: str) -> Dict[str, Any]:
         url = f"{self.base_url}/assetmgmt/assets/id/{asset_id}"
@@ -198,7 +198,7 @@ def get_incident(incident_id: str, user: str = Depends(verify_basic_auth)) -> Di
     summary="Retorna ativos do TopDesk",
     description="Lista todos os ativos transacionais por Template ID."
 )
-def list_assets(template_id: str, fields: Optional[str], user: str = Depends(verify_basic_auth)) -> List[Dict[str, Any]]:
+def list_assets(template_id: str, fields: Optional[str] = None, user: str = Depends(verify_basic_auth)) -> List[Dict[str, Any]]:
     logging.info('GET /v1/assets')
     client = get_topdesk_client()    
     fields_lst = None
@@ -207,8 +207,7 @@ def list_assets(template_id: str, fields: Optional[str], user: str = Depends(ver
         if fields:
             fields_lst = fields.split(',')
     try:
-        data = client.get_transaction_assets(template_id=template_id, fields=fields_lst)
-        return data
+        return client.get_transaction_assets(template_id=template_id, fields=fields_lst)
     except Exception as e:
         logging.error(str(e))
         return [] # fixme: fastapi must return server side error with error message
